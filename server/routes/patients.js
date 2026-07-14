@@ -78,6 +78,50 @@ router.get('/patients/:id/referral-stats', requireAuth, (req, res) => {
   });
 });
 
+// ---- 病歷首頁彙整（一頁整合病患關鍵資訊）----
+router.get('/patients/:id/summary', requireAuth, (req, res) => {
+  const id = req.params.id;
+  const patient = db.prepare(`
+    SELECT p.*, r.name AS referrer_name, r.chart_no AS referrer_chart_no
+    FROM patients p LEFT JOIN patients r ON r.id = p.referred_by
+    WHERE p.id = ?
+  `).get(id);
+  if (!patient) return res.status(404).json({ error: '找不到病患' });
+
+  const packages = db.prepare(`
+    SELECT k.*, s.name AS service_name, s.category
+    FROM packages k JOIN services s ON s.id = k.service_id
+    WHERE k.patient_id = ? ORDER BY k.id DESC
+  `).all(id);
+
+  const visitAgg = db.prepare('SELECT COUNT(*) AS c, MAX(date) AS last FROM visits WHERE patient_id = ?').get(id);
+  const spent = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE patient_id = ?').get(id).t;
+  const referredCount = db.prepare('SELECT COUNT(*) AS c FROM patients WHERE referred_by = ?').get(id).c;
+  const referredRevenue = db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE patient_id IN (SELECT id FROM patients WHERE referred_by = ?)'
+  ).get(id).t;
+
+  const recentVisits = db.prepare(`
+    SELECT v.*, u.name AS doctor_name,
+      (SELECT COUNT(*) FROM photos WHERE visit_id = v.id) AS photo_count
+    FROM visits v LEFT JOIN users u ON u.id = v.doctor_id
+    WHERE v.patient_id = ? ORDER BY v.date DESC, v.id DESC LIMIT 3
+  `).all(id);
+
+  res.json({
+    patient,
+    packages,
+    totals: {
+      visits: visitAgg.c,
+      lastVisit: visitAgg.last,
+      spent,
+      referredCount,
+      referredRevenue,
+    },
+    recentVisits,
+  });
+});
+
 // ---- 療程套組 ----
 router.get('/patients/:id/packages', requireAuth, (req, res) => {
   res.json(db.prepare(`

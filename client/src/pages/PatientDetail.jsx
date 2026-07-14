@@ -6,14 +6,14 @@ import { PatientFields } from './Patients.jsx';
 import { useAuth } from '../App.jsx';
 
 const TABS = [
-  ['info', '基本資料'], ['packages', '療程套組'], ['visits', '看診記錄'],
-  ['photos', '照片'], ['payments', '收費記錄'],
+  ['summary', '病歷首頁'], ['info', '基本資料'], ['packages', '療程套組'],
+  ['visits', '看診記錄'], ['photos', '照片'], ['payments', '收費記錄'],
 ];
 
 export default function PatientDetail() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') || 'info';
+  const tab = params.get('tab') || 'summary';
   const [patient, setPatient] = useState(null);
 
   const load = useCallback(() => {
@@ -47,11 +47,124 @@ export default function PatientDetail() {
         ))}
       </div>
 
+      {tab === 'summary' && <ChartSummary patientId={id} onEdit={() => setParams({ tab: 'info' })} />}
       {tab === 'info' && <InfoTab patient={patient} onSaved={load} />}
       {tab === 'packages' && <PackagesTab patientId={id} />}
       {tab === 'visits' && <VisitsTab patientId={id} />}
       {tab === 'photos' && <PhotosTab patientId={id} />}
       {tab === 'payments' && <PaymentsTab patientId={id} />}
+    </div>
+  );
+}
+
+function ChartSummary({ patientId, onEdit }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    api(`/patients/${patientId}/summary`).then(setData).catch(() => {});
+  }, [patientId]);
+  if (!data) return null;
+
+  const { patient: p, packages, totals, recentVisits } = data;
+  const hasAllergy = p.allergies && p.allergies.trim();
+  const row = (label, value) => (
+    <div className="summary-row">
+      <span className="muted small">{label}</span>
+      <span>{value || '—'}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 12 }}>
+        <button className="secondary" onClick={onEdit}>編輯基本資料</button>
+        <button onClick={() => window.print()}>🖨 列印病歷首頁</button>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h2 className="summary-h">病患基本資料</h2>
+        <div className="summary-grid">
+          {row('病歷號', p.chart_no)}
+          {row('姓名', p.name)}
+          {row('性別', GENDER_LABELS[p.gender])}
+          {row('生日', p.birthdate ? `${p.birthdate}（${age(p.birthdate)} 歲）` : '')}
+          {row('電話', p.phone)}
+          {row('Email', p.email)}
+          {row('膚質', p.skin_type)}
+          {row('來源', p.referral_source)}
+          {row('建檔日', (p.created_at || '').slice(0, 10))}
+          {row('地址', p.address)}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14, borderColor: hasAllergy ? '#fecaca' : undefined, background: hasAllergy ? '#fef2f2' : undefined }}>
+        <h2 className="summary-h">{hasAllergy ? '⚠️ 過敏史 / 病史' : '過敏史 / 病史'}</h2>
+        <div className="summary-row">
+          <span className="muted small">過敏史</span>
+          <strong style={{ color: hasAllergy ? 'var(--danger)' : 'inherit' }}>{hasAllergy ? p.allergies : '無記錄'}</strong>
+        </div>
+        {row('病史', p.medical_history)}
+      </div>
+
+      <div className="stat-row">
+        <div className="stat-card"><div className="label">就診次數</div><div className="value">{totals.visits}</div></div>
+        <div className="stat-card"><div className="label">最近就診</div><div className="value" style={{ fontSize: 20 }}>{totals.lastVisit || '—'}</div></div>
+        <div className="stat-card"><div className="label">累計消費</div><div className="value" style={{ fontSize: 22 }}>{fmtMoney(totals.spent)}</div></div>
+        <div className="stat-card"><div className="label">推薦新客</div><div className="value">{totals.referredCount} <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}>位</span></div></div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h2 className="summary-h">療程套組（剩餘堂數）</h2>
+        {packages.length === 0 ? <Empty>尚未購買療程套組</Empty> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>療程項目</th><th>已用 / 總堂</th><th>剩餘</th><th>購買日</th></tr></thead>
+              <tbody>
+                {packages.map((k) => {
+                  const left = k.total_sessions - k.used_sessions;
+                  return (
+                    <tr key={k.id}>
+                      <td><strong>{k.service_name}</strong></td>
+                      <td>{k.used_sessions} / {k.total_sessions}</td>
+                      <td>{left > 0 ? <span className="badge completed">剩 {left} 堂</span> : <span className="badge cancelled">已用完</span>}</td>
+                      <td className="muted small">{k.purchased_at}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {(p.referrer_name || totals.referredCount > 0) && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <h2 className="summary-h">推薦關係</h2>
+          {p.referrer_name && (
+            <div className="small">由 <strong>{p.referrer_name}</strong>（{p.referrer_chart_no}）介紹而來</div>
+          )}
+          {totals.referredCount > 0 && (
+            <div className="small" style={{ marginTop: 4 }}>
+              已推薦 <strong style={{ color: 'var(--primary)' }}>{totals.referredCount}</strong> 位新客，
+              帶來營收 <strong style={{ color: 'var(--primary)' }}>{fmtMoney(totals.referredRevenue)}</strong>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card">
+        <h2 className="summary-h">最近看診記錄</h2>
+        {recentVisits.length === 0 ? <Empty>尚無看診記錄</Empty> : recentVisits.map((v) => (
+          <div key={v.id} className="visit-card" style={{ marginBottom: 10 }}>
+            <div className="meta">
+              <strong>{v.date}</strong>
+              {v.doctor_name && <span className="muted small">{v.doctor_name}</span>}
+              {v.photo_count > 0 && <span className="badge before">📷 {v.photo_count}</span>}
+            </div>
+            {v.chief_complaint && <div className="small"><span className="muted">主訴：</span>{v.chief_complaint}</div>}
+            {v.treatment && <div className="small"><span className="muted">處置：</span>{v.treatment}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
