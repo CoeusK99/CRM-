@@ -20,7 +20,7 @@ npm --prefix client install
 npm run dev        # API :3020 + Vite :5175（proxy /api）
 ```
 
-預設帳號：`admin/admin123`、`doctor1/doctor123`、`staff1/staff123`
+預設帳號（以 Email 登入）：`admin@clinic.tw / admin123`、`doctor@clinic.tw / doctor123`、`staff@clinic.tw / staff123`。忘記密碼由管理員在「系統設定 → 使用者帳號」重設。
 
 ## 正式執行
 

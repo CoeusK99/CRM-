@@ -34,7 +34,7 @@
    ```
    （`PORT` 由 Zeabur 自動注入，不用設）
 6. Networking → 綁定網域 / 產生 `.zeabur.app` 網址（Zeabur 自動配 HTTPS）
-7. 首次上線後：用 `admin / admin123` 登入 →「系統設定 → 使用者帳號」立刻改密碼
+7. 首次上線後：用 `admin@clinic.tw / admin123` 登入 →「系統設定 → 使用者帳號」立刻改密碼
 
 ## 方案二：Railway
 
@@ -60,9 +60,10 @@ SESSION_SECRET=xxx COOKIE_SECURE=1 PORT=3020 npm start
 
 1. **改掉預設密碼**：系統內建三個示範帳號，上線後立刻用 admin 登入
    「系統設定 → 使用者帳號」重設密碼或停用：
-   - `admin / admin123`（管理者）
-   - `doctor1 / doctor123`（醫師）
-   - `staff1 / staff123`（櫃檯）
+   - `admin@clinic.tw / admin123`（管理者）
+   - `doctor@clinic.tw / doctor123`（醫師）
+   - `staff@clinic.tw / staff123`（櫃檯）
+   （登入一律用 Email；忘記密碼由管理員在「系統設定 → 使用者帳號」重設）
 2. **設定 `SESSION_SECRET`**，並在 HTTPS 環境開 `COOKIE_SECURE=1`
 3. **確認備份**：病歷屬個資，`data/` 與 `uploads/` 要有異地備份計畫
 

@@ -104,21 +104,28 @@ function ServicesTab() {
 
 function UsersTab() {
   const [rows, setRows] = useState([]);
+  const [requests, setRequests] = useState([]);
   const [modal, setModal] = useState(null); // 'new' | user 物件
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     api('/users').then(setRows).catch(() => {});
+    api('/reset-requests').then(setRequests).catch(() => {});
   }, []);
   useEffect(load, [load]);
 
   const open = (u) => {
     setForm(u === 'new'
-      ? { username: '', password: '', name: '', role: 'staff' }
+      ? { email: '', password: '', name: '', role: 'staff' }
       : { ...u, password: '' });
     setError('');
     setModal(u);
+  };
+
+  const dismissRequest = async (id) => {
+    await api(`/reset-requests/${id}/resolve`, { method: 'POST' });
+    load();
   };
 
   const save = async () => {
@@ -135,16 +142,34 @@ function UsersTab() {
 
   return (
     <div className="card">
+      {requests.length > 0 && (
+        <div className="card" style={{ background: '#fff7ed', border: '1px solid #fed7aa', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, marginBottom: 8 }}>🔑 待處理的密碼重設申請（{requests.length}）</h3>
+          {requests.map((r) => {
+            const user = rows.find((u) => u.id === r.user_id);
+            return (
+              <div key={r.id} className="list-row" style={{ borderBottom: 'none', padding: '6px 0' }}>
+                <strong>{r.user_name}</strong>
+                <span className="muted small">{r.email}・{ROLE_LABELS[r.role]}・{(r.created_at || '').slice(0, 16)}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                  {user && <button className="sm" onClick={() => open(user)}>重設密碼</button>}
+                  <button className="sm secondary" onClick={() => dismissRequest(r.id)}>忽略</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={{ marginBottom: 14 }}>
         <button onClick={() => open('new')}>＋ 新增使用者</button>
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>帳號</th><th>姓名</th><th>角色</th><th>狀態</th><th></th></tr></thead>
+          <thead><tr><th>Email（登入帳號）</th><th>姓名</th><th>角色</th><th>狀態</th><th></th></tr></thead>
           <tbody>
             {rows.map((u) => (
               <tr key={u.id}>
-                <td>{u.username}</td>
+                <td>{u.email}</td>
                 <td><strong>{u.name}</strong></td>
                 <td>{ROLE_LABELS[u.role]}</td>
                 <td>{u.active ? <span className="badge completed">啟用</span> : <span className="badge cancelled">停用</span>}</td>
@@ -158,10 +183,9 @@ function UsersTab() {
       {modal && (
         <Modal title={modal === 'new' ? '新增使用者' : '編輯使用者'} onClose={() => setModal(null)}>
           <div className="form-grid">
-            {modal === 'new' && (
-              <Field label="登入帳號"><input value={form.username} autoCapitalize="none"
-                onChange={(e) => setForm({ ...form, username: e.target.value })} /></Field>
-            )}
+            <Field label="Email（登入帳號）"><input type="email" value={form.email || ''} autoCapitalize="none"
+              placeholder="name@clinic.tw"
+              onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="姓名"><input value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
             <Field label="角色">
@@ -185,7 +209,7 @@ function UsersTab() {
           {error && <div className="error-msg">{error}</div>}
           <div className="actions">
             <button className="secondary" onClick={() => setModal(null)}>取消</button>
-            <button disabled={!form.name || (modal === 'new' && (!form.username || !form.password))} onClick={save}>儲存</button>
+            <button disabled={!form.name || !form.email || (modal === 'new' && !form.password)} onClick={save}>儲存</button>
           </div>
         </Modal>
       )}

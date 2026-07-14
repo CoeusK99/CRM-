@@ -18,6 +18,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
+  email TEXT,
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin','doctor','staff')),
@@ -121,6 +122,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   sess TEXT NOT NULL,
   expire INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','handled')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  handled_at TEXT
+);
 `);
 
 // ---- 欄位遷移（讓既有資料庫也能升級）----
@@ -128,6 +138,19 @@ const patientCols = db.prepare("PRAGMA table_info(patients)").all().map((c) => c
 if (!patientCols.includes('referred_by')) {
   db.exec('ALTER TABLE patients ADD COLUMN referred_by INTEGER REFERENCES patients(id)');
 }
+
+const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!userCols.includes('email')) {
+  db.exec('ALTER TABLE users ADD COLUMN email TEXT');
+}
+// 既有帳號補上 email（登入改用 email，避免被鎖在外面）
+db.exec(`
+  UPDATE users SET email='admin@clinic.tw'  WHERE username='admin'   AND (email IS NULL OR email='');
+  UPDATE users SET email='doctor@clinic.tw' WHERE username='doctor1' AND (email IS NULL OR email='');
+  UPDATE users SET email='staff@clinic.tw'  WHERE username='staff1'  AND (email IS NULL OR email='');
+  UPDATE users SET email = username || '@clinic.local' WHERE email IS NULL OR email='';
+`);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)');
 
 export function today() {
   const d = new Date();
@@ -143,10 +166,10 @@ export function nextChartNo() {
 const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
 if (userCount === 0) {
   const insertUser = db.prepare(
-    'INSERT INTO users (username, password_hash, name, role) VALUES (?, ?, ?, ?)');
-  insertUser.run('admin', bcrypt.hashSync('admin123', 10), '系統管理員', 'admin');
-  insertUser.run('doctor1', bcrypt.hashSync('doctor123', 10), '王醫師', 'doctor');
-  insertUser.run('staff1', bcrypt.hashSync('staff123', 10), '陳櫃檯', 'staff');
+    'INSERT INTO users (username, email, password_hash, name, role) VALUES (?, ?, ?, ?, ?)');
+  insertUser.run('admin', 'admin@clinic.tw', bcrypt.hashSync('admin123', 10), '系統管理員', 'admin');
+  insertUser.run('doctor1', 'doctor@clinic.tw', bcrypt.hashSync('doctor123', 10), '王醫師', 'doctor');
+  insertUser.run('staff1', 'staff@clinic.tw', bcrypt.hashSync('staff123', 10), '陳櫃檯', 'staff');
 
   const insertService = db.prepare(
     'INSERT INTO services (name, category, price, default_sessions) VALUES (?, ?, ?, ?)');
