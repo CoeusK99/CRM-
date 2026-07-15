@@ -39,6 +39,22 @@ export const FORM_TEMPLATES = {
       { key: 'aftercare', label: '術後衛教', type: 'textarea' },
     ],
   },
+  hair_transplant: {
+    label: '植髮術後',
+    fields: [
+      { key: 'method', label: '移植方式', type: 'select', options: ['FUE', 'FUT', 'FUE + FUT'] },
+      { key: 'grafts', label: '移植株數', type: 'number' },
+      { key: 'recipient_area', label: '植髮部位', type: 'text' },
+      { key: 'days_postop', label: '術後天數', type: 'number' },
+      { key: 'swelling', label: '腫脹程度', type: 'select', options: ['無', '輕微', '中度', '明顯'] },
+      { key: 'pain', label: '疼痛程度', type: 'select', options: ['無', '輕微', '中度', '劇烈'] },
+      { key: 'graft_condition', label: '植髮區狀況（結痂/紅腫/生長）', type: 'textarea' },
+      { key: 'donor_condition', label: '供區狀況', type: 'textarea' },
+      { key: 'medication', label: '用藥', type: 'text' },
+      { key: 'aftercare', label: '清潔與衛教', type: 'textarea' },
+      { key: 'next_followup', label: '下次回診', type: 'text' },
+    ],
+  },
   satisfaction: {
     label: '滿意度問卷',
     fields: [
@@ -50,7 +66,7 @@ export const FORM_TEMPLATES = {
   },
 };
 
-export const FORM_TYPE_ORDER = ['general', 'followup', 'initial', 'procedure', 'satisfaction'];
+export const FORM_TYPE_ORDER = ['general', 'followup', 'initial', 'procedure', 'hair_transplant', 'satisfaction'];
 
 export const formLabel = (t) => (FORM_TEMPLATES[t] || FORM_TEMPLATES.general).label;
 
