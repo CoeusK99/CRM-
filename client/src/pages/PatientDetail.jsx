@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { age, api, fmtMoney, GENDER_LABELS, METHOD_LABELS, today } from '../api.js';
 import { Empty, Field, Modal } from '../components/ui.jsx';
 import { PatientFields } from './Patients.jsx';
 import { useAuth } from '../App.jsx';
+import { FORM_TEMPLATES, FORM_TYPE_ORDER, formEntries, formLabel } from '../formTemplates.js';
 
 const TABS = [
   ['summary', '病歷首頁'], ['info', '基本資料'], ['packages', '療程套組'],
@@ -75,6 +76,10 @@ function ChartSummary({ patientId, onEdit }) {
 
   return (
     <div>
+      <div className="print-only print-header">
+        <div className="clinic-name">🏥 診所 CRM　病歷首頁</div>
+        <div className="print-meta">病歷號 {p.chart_no}　姓名 {p.name}　列印日期：{today()}</div>
+      </div>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 12 }}>
         <button className="secondary" onClick={onEdit}>編輯基本資料</button>
         <button onClick={() => window.print()}>🖨 列印病歷首頁</button>
@@ -153,17 +158,22 @@ function ChartSummary({ patientId, onEdit }) {
 
       <div className="card">
         <h2 className="summary-h">最近看診記錄</h2>
-        {recentVisits.length === 0 ? <Empty>尚無看診記錄</Empty> : recentVisits.map((v) => (
-          <div key={v.id} className="visit-card" style={{ marginBottom: 10 }}>
-            <div className="meta">
-              <strong>{v.date}</strong>
-              {v.doctor_name && <span className="muted small">{v.doctor_name}</span>}
-              {v.photo_count > 0 && <span className="badge before">📷 {v.photo_count}</span>}
+        {recentVisits.length === 0 ? <Empty>尚無看診記錄</Empty> : recentVisits.map((v) => {
+          const entries = formEntries(v.form_type, v.form_data);
+          return (
+            <div key={v.id} className="visit-card" style={{ marginBottom: 10 }}>
+              <div className="meta">
+                <strong>{v.date}</strong>
+                <span className="badge booked">{formLabel(v.form_type)}</span>
+                {v.doctor_name && <span className="muted small">{v.doctor_name}</span>}
+                {v.photo_count > 0 && <span className="badge before">📷 {v.photo_count}</span>}
+              </div>
+              {entries.slice(0, 2).map((e, i) => (
+                <div key={i} className="small"><span className="muted">{e.label}：</span>{e.value}</div>
+              ))}
             </div>
-            {v.chief_complaint && <div className="small"><span className="muted">主訴：</span>{v.chief_complaint}</div>}
-            {v.treatment && <div className="small"><span className="muted">處置：</span>{v.treatment}</div>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -350,6 +360,33 @@ function PackagesTab({ patientId }) {
   );
 }
 
+function StarRating({ value, onChange }) {
+  const v = Number(value) || 0;
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button type="button" key={n} className="star-btn"
+          style={{ color: n <= v ? '#f59e0b' : '#cbd5e1' }}
+          onClick={() => onChange(n === v ? '' : n)}>★</button>
+      ))}
+      {v > 0 && <span className="muted small">{v} / 5</span>}
+    </div>
+  );
+}
+
+function FormFieldInput({ field, value, onChange }) {
+  if (field.type === 'textarea') return <textarea value={value || ''} onChange={(e) => onChange(e.target.value)} />;
+  if (field.type === 'number') return <input type="number" value={value || ''} onChange={(e) => onChange(e.target.value)} />;
+  if (field.type === 'rating') return <StarRating value={value} onChange={onChange} />;
+  if (field.type === 'select') return (
+    <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
+      <option value="">請選擇</option>
+      {field.options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+  return <input type="text" value={value || ''} onChange={(e) => onChange(e.target.value)} />;
+}
+
 function VisitsTab({ patientId }) {
   const user = useAuth();
   const canEdit = ['admin', 'doctor'].includes(user.role);
@@ -358,11 +395,11 @@ function VisitsTab({ patientId }) {
   const [packages, setPackages] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [show, setShow] = useState(!!params.get('appt'));
-  const [form, setForm] = useState({
-    date: today(), doctor_id: '', package_id: '',
-    chief_complaint: '', treatment: '', doctor_orders: '',
-    appointment_id: params.get('appt') || null,
+  const [formType, setFormType] = useState('general');
+  const [meta, setMeta] = useState({
+    date: today(), doctor_id: '', package_id: '', appointment_id: params.get('appt') || null,
   });
+  const [formData, setFormData] = useState({});
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
@@ -373,16 +410,28 @@ function VisitsTab({ patientId }) {
   useEffect(() => {
     api('/users').then((us) => {
       setDoctors(us.filter((u) => u.role === 'doctor'));
-      if (user.role === 'doctor') setForm((f) => ({ ...f, doctor_id: user.id }));
+      if (user.role === 'doctor') setMeta((m) => ({ ...m, doctor_id: user.id }));
     });
   }, [user]);
+
+  const openNew = () => {
+    setFormType('general');
+    setMeta({ date: today(), doctor_id: user.role === 'doctor' ? user.id : '', package_id: '', appointment_id: null });
+    setFormData({});
+    setError('');
+    setShow(true);
+  };
+  const setField = (key, val) => setFormData((d) => ({ ...d, [key]: val }));
 
   const save = async () => {
     setError('');
     try {
-      await api(`/patients/${patientId}/visits`, { method: 'POST', body: form });
+      await api(`/patients/${patientId}/visits`, {
+        method: 'POST',
+        body: { form_type: formType, form_data: formData, ...meta },
+      });
       setShow(false);
-      setForm({ date: today(), doctor_id: form.doctor_id, package_id: '', chief_complaint: '', treatment: '', doctor_orders: '', appointment_id: null });
+      setFormData({});
       load();
     } catch (err) {
       setError(err.message);
@@ -390,52 +439,62 @@ function VisitsTab({ patientId }) {
   };
 
   const available = packages.filter((k) => k.used_sessions < k.total_sessions);
+  const tpl = FORM_TEMPLATES[formType];
 
   return (
     <div className="card">
       {canEdit && (
         <div style={{ marginBottom: 14 }}>
-          <button onClick={() => setShow(true)}>＋ 新增看診記錄</button>
+          <button onClick={openNew}>＋ 新增看診記錄</button>
         </div>
       )}
       {!canEdit && <div className="muted small" style={{ marginBottom: 12 }}>（看診記錄僅供檢視，如需修改請由醫師操作）</div>}
-      {rows.length === 0 ? <Empty>尚無看診記錄</Empty> : rows.map((v) => (
-        <div key={v.id} className="visit-card">
-          <div className="meta">
-            <strong>{v.date}</strong>
-            {v.doctor_name && <span className="muted small">{v.doctor_name}</span>}
-            {v.package_service_name && <span className="badge completed">扣套組：{v.package_service_name}</span>}
-          </div>
-          <dl>
-            {v.chief_complaint && <><dt>主訴</dt><dd>{v.chief_complaint}</dd></>}
-            {v.treatment && <><dt>處置內容</dt><dd>{v.treatment}</dd></>}
-            {v.doctor_orders && <><dt>醫囑</dt><dd>{v.doctor_orders}</dd></>}
-          </dl>
-          {v.photos.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              {v.photos.map((ph) => (
-                <a key={ph.id} href={ph.file_path} target="_blank" rel="noreferrer">
-                  <img src={ph.file_path} alt={ph.type} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8 }} />
-                </a>
-              ))}
+      {rows.length === 0 ? <Empty>尚無看診記錄</Empty> : rows.map((v) => {
+        const entries = formEntries(v.form_type, v.form_data);
+        return (
+          <div key={v.id} className="visit-card">
+            <div className="meta">
+              <strong>{v.date}</strong>
+              <span className="badge booked">{formLabel(v.form_type)}</span>
+              {v.doctor_name && <span className="muted small">{v.doctor_name}</span>}
+              {v.package_service_name && <span className="badge completed">扣套組：{v.package_service_name}</span>}
             </div>
-          )}
-        </div>
-      ))}
+            {entries.length === 0 ? <div className="muted small">（未填內容）</div> : (
+              <dl>
+                {entries.map((e, i) => <Fragment key={i}><dt>{e.label}</dt><dd>{e.value}</dd></Fragment>)}
+              </dl>
+            )}
+            {v.photos.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                {v.photos.map((ph) => (
+                  <a key={ph.id} href={ph.file_path} target="_blank" rel="noreferrer">
+                    <img src={ph.file_path} alt={ph.type} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8 }} />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {show && (
         <Modal title="新增看診記錄" wide onClose={() => setShow(false)}>
           <div className="form-grid">
-            <Field label="日期"><input type="date" value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+            <Field label="表單類型">
+              <select value={formType} onChange={(e) => { setFormType(e.target.value); setFormData({}); }}>
+                {FORM_TYPE_ORDER.map((t) => <option key={t} value={t}>{FORM_TEMPLATES[t].label}</option>)}
+              </select>
+            </Field>
+            <Field label="日期"><input type="date" value={meta.date}
+              onChange={(e) => setMeta({ ...meta, date: e.target.value })} /></Field>
             <Field label="醫師">
-              <select value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
+              <select value={meta.doctor_id} onChange={(e) => setMeta({ ...meta, doctor_id: e.target.value })}>
                 <option value="">未指定</option>
                 {doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </Field>
-            <Field label="使用療程套組（自動扣 1 堂）" full>
-              <select value={form.package_id} onChange={(e) => setForm({ ...form, package_id: e.target.value })}>
+            <Field label="使用療程套組（自動扣 1 堂）">
+              <select value={meta.package_id} onChange={(e) => setMeta({ ...meta, package_id: e.target.value })}>
                 <option value="">不扣堂數</option>
                 {available.map((k) => (
                   <option key={k.id} value={k.id}>
@@ -444,14 +503,13 @@ function VisitsTab({ patientId }) {
                 ))}
               </select>
             </Field>
-            <Field label="主訴" full><textarea value={form.chief_complaint}
-              onChange={(e) => setForm({ ...form, chief_complaint: e.target.value })} /></Field>
-            <Field label="處置內容" full><textarea value={form.treatment}
-              onChange={(e) => setForm({ ...form, treatment: e.target.value })} /></Field>
-            <Field label="醫囑" full><textarea value={form.doctor_orders}
-              onChange={(e) => setForm({ ...form, doctor_orders: e.target.value })} /></Field>
+            {tpl.fields.map((f) => (
+              <Field key={f.key} label={f.label} full={f.type === 'textarea'}>
+                <FormFieldInput field={f} value={formData[f.key]} onChange={(val) => setField(f.key, val)} />
+              </Field>
+            ))}
           </div>
-          {form.appointment_id && <div className="muted small" style={{ marginTop: 8 }}>儲存後將自動把今日預約標記為「完成」。</div>}
+          {meta.appointment_id && <div className="muted small" style={{ marginTop: 8 }}>儲存後將自動把今日預約標記為「完成」。</div>}
           {error && <div className="error-msg">{error}</div>}
           <div className="actions">
             <button className="secondary" onClick={() => setShow(false)}>取消</button>

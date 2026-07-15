@@ -107,6 +107,7 @@ router.get('/patients/:id/summary', requireAuth, (req, res) => {
     FROM visits v LEFT JOIN users u ON u.id = v.doctor_id
     WHERE v.patient_id = ? ORDER BY v.date DESC, v.id DESC LIMIT 3
   `).all(id);
+  for (const v of recentVisits) v.form_data = visitFormData(v);
 
   res.json({
     patient,
@@ -166,12 +167,35 @@ router.get('/patients/:id/visits', requireAuth, (req, res) => {
     WHERE v.patient_id = ? ORDER BY v.date DESC, v.id DESC
   `).all(req.params.id);
   const photoStmt = db.prepare('SELECT * FROM photos WHERE visit_id = ? ORDER BY id');
-  for (const v of visits) v.photos = photoStmt.all(v.id);
+  for (const v of visits) {
+    v.photos = photoStmt.all(v.id);
+    v.form_data = visitFormData(v);
+  }
   res.json(visits);
 });
 
+// form_data 以 JSON 存放；舊資料只有獨立欄位時自動回填，確保顯示正常
+function parseFormData(raw) {
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+function visitFormData(v) {
+  const d = parseFormData(v.form_data);
+  if (Object.keys(d).length === 0) {
+    if (v.chief_complaint) d.chief_complaint = v.chief_complaint;
+    if (v.treatment) d.treatment = v.treatment;
+    if (v.doctor_orders) d.doctor_orders = v.doctor_orders;
+  }
+  return d;
+}
+
 router.post('/patients/:id/visits', requireRole('admin', 'doctor'), (req, res) => {
-  const { doctor_id, appointment_id, package_id, date, chief_complaint, treatment, doctor_orders } = req.body || {};
+  const { doctor_id, appointment_id, package_id, date } = req.body || {};
+  const form_type = req.body.form_type || 'general';
+  const fd = (req.body.form_data && typeof req.body.form_data === 'object') ? req.body.form_data : {};
+  const cc = fd.chief_complaint ?? req.body.chief_complaint ?? null;
+  const tx = fd.treatment ?? req.body.treatment ?? null;
+  const od = fd.doctor_orders ?? req.body.doctor_orders ?? null;
   const patientId = Number(req.params.id);
   const create = db.transaction(() => {
     if (package_id) {
@@ -183,11 +207,11 @@ router.post('/patients/:id/visits', requireRole('admin', 'doctor'), (req, res) =
     }
     const info = db.prepare(`
       INSERT INTO visits (patient_id, doctor_id, appointment_id, package_id, date,
-        chief_complaint, treatment, doctor_orders)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        form_type, form_data, chief_complaint, treatment, doctor_orders)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(patientId, doctor_id || req.session.user.id, appointment_id || null,
       package_id || null, date || today(),
-      chief_complaint || null, treatment || null, doctor_orders || null);
+      form_type, JSON.stringify(fd), cc, tx, od);
     if (appointment_id) {
       db.prepare("UPDATE appointments SET status = 'completed' WHERE id = ?").run(appointment_id);
     }
@@ -203,10 +227,14 @@ router.post('/patients/:id/visits', requireRole('admin', 'doctor'), (req, res) =
 router.put('/visits/:id', requireRole('admin', 'doctor'), (req, res) => {
   const v = db.prepare('SELECT * FROM visits WHERE id = ?').get(req.params.id);
   if (!v) return res.status(404).json({ error: '找不到看診記錄' });
-  const { chief_complaint, treatment, doctor_orders } = req.body || {};
-  db.prepare('UPDATE visits SET chief_complaint = ?, treatment = ?, doctor_orders = ? WHERE id = ?')
-    .run(chief_complaint ?? v.chief_complaint, treatment ?? v.treatment,
-      doctor_orders ?? v.doctor_orders, v.id);
+  const form_type = req.body.form_type || v.form_type || 'general';
+  const fd = (req.body.form_data && typeof req.body.form_data === 'object')
+    ? req.body.form_data : parseFormData(v.form_data);
+  db.prepare(`
+    UPDATE visits SET form_type = ?, form_data = ?, chief_complaint = ?, treatment = ?, doctor_orders = ?
+    WHERE id = ?
+  `).run(form_type, JSON.stringify(fd),
+    fd.chief_complaint ?? null, fd.treatment ?? null, fd.doctor_orders ?? null, v.id);
   res.json({ ok: true });
 });
 

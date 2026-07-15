@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS visits (
   appointment_id INTEGER REFERENCES appointments(id),
   package_id INTEGER REFERENCES packages(id),
   date TEXT NOT NULL,
+  form_type TEXT NOT NULL DEFAULT 'general',
+  form_data TEXT,
   chief_complaint TEXT,
   treatment TEXT,
   doctor_orders TEXT,
@@ -151,6 +153,14 @@ db.exec(`
   UPDATE users SET email = username || '@clinic.local' WHERE email IS NULL OR email='';
 `);
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+
+const visitCols = db.prepare("PRAGMA table_info(visits)").all().map((c) => c.name);
+if (!visitCols.includes('form_type')) {
+  db.exec("ALTER TABLE visits ADD COLUMN form_type TEXT NOT NULL DEFAULT 'general'");
+}
+if (!visitCols.includes('form_data')) {
+  db.exec('ALTER TABLE visits ADD COLUMN form_data TEXT');
+}
 
 export function today() {
   const d = new Date();
